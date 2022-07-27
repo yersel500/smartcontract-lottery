@@ -9,6 +9,11 @@ import "@chainlink/contracts/src/v0.8/interfaces/KeeperCompatibleInterface.sol";
 error Raffle__NotEnoughtETHEntered();
 error Raffle__TransferFailed();
 error Raffle__NotOpen();
+error Raffle__UpkeepNotNeeded(
+    uint256 currentBalance,
+    uint256 numPlayers,
+    uint256 raffleState
+);
 
 contract Raffle is VRFConsumerBaseV2, KeeperCompatibleInterface {
     // Type declarations
@@ -68,9 +73,9 @@ contract Raffle is VRFConsumerBaseV2, KeeperCompatibleInterface {
     }
 
     function checkUpkeep(
-        bytes calldata /*checkData*/
+        bytes memory /*checkData*/
     )
-        external
+        public
         override
         returns (
             bool upkeepNeeded,
@@ -84,7 +89,17 @@ contract Raffle is VRFConsumerBaseV2, KeeperCompatibleInterface {
         upkeepNeeded = (isOpen && timePassed && hasPlayers && hasBalance);
     }
 
-    function requestRandomWinner() external {
+    function performUpkepp(
+        bytes calldata /* performData */
+    ) external override {
+        (bool upkeepNeeded, ) = checkUpkeep("");
+        if (!upkeepNeeded) {
+            revert Raffle__UpkeepNotNeeded(
+                address(this).balance,
+                s_players.length,
+                uint256(s_raffleState)
+            );
+        }
         s_raffleState = RaffleState.CALCULATING;
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
             i_gasLane,
@@ -106,6 +121,7 @@ contract Raffle is VRFConsumerBaseV2, KeeperCompatibleInterface {
         s_recentWinner = recentWinner;
         s_raffleState = RaffleState.OPEN;
         s_players = new address payable[](0);
+        s_lastTimeStamp = block.timestamp;
         (bool success, ) = recentWinner.call{value: address(this).balance}("");
         if (!success) {
             revert Raffle__TransferFailed();
@@ -123,5 +139,13 @@ contract Raffle is VRFConsumerBaseV2, KeeperCompatibleInterface {
 
     function getRecentWinner() public view returns (address) {
         return s_recentWinner;
+    }
+
+    function getRaffleState() public view returns (RaffleState) {
+        return s_raffleState;
+    }
+
+    function getNumWords() public view returns (uint256) {
+        return NUM_WORDS;
     }
 }
