@@ -1,5 +1,6 @@
 const { assert, expect } = require("chai");
 const { getNamedAccounts, deployments, ethers, network } = require("hardhat");
+const { resolveConfig } = require("prettier");
 const {
   developmentChains,
   networkConfig,
@@ -136,6 +137,64 @@ const {
           await expect(
             vrfCoordinatorV2Mock.fulfillRandomWords(1, raffle.address)
           ).to.be.revertedWith("nonexistent request");
+        });
+
+        it("picks a winner, resets the lottery, and sends money", async function () {
+          const additionalEntrants = 3;
+          const startingAccountIndex = 1;
+          const accounts = await ethers.getSigners();
+          for (
+            let i = startingAccountIndex;
+            i < startingAccountIndex + additionalEntrants;
+            i++
+          ) {
+            const accountConnectedRaffle = raffle.connect(accounts[i]);
+            await accountConnectedRaffle.enterRaffle({
+              value: raffleEntranceFee,
+            });
+          }
+          const startingTimeStamp = await raffle.getLatestTimeStamp();
+
+          await new Promise(async (resolve, reject) => {
+            raffle.once("WinnerPicked", async () => {
+              try {
+                const recentWinner = await raffle.getRecentWinner();
+                console.log(recentWinner);
+                console.log(accounts[2]);
+                console.log(accounts[0]);
+                console.log(accounts[1]);
+                console.log(accounts[3]);
+
+                const raffleState = await raffle.getRaffleState();
+                const endingTimeStamp = await raffle.getLatestTimeStamp();
+                const numPlayers = await raffle.getNumberOfPlayers();
+                const winnerEndingBalance = await accounts[1].getBalance();
+                assert.equal(numPlayers.toString(), "0");
+                assert.equal(raffleState.toString(), "0");
+                assert(endingTimeStamp > startingTimeStamp);
+                assert.equal(
+                  winnerEndingBalance.toString(),
+                  winnerStartingBalance.add(
+                    raffleEntranceFee
+                      .mul(additionalEntrants)
+                      .add(raffleEntranceFee)
+                      .toString()
+                  )
+                );
+              } catch (e) {
+                reject(e);
+              }
+              resolve();
+            });
+
+            const tx = await raffle.performUpkeep([]);
+            const txReceipt = await tx.wait(1);
+            const winnerStartingBalance = await accounts[1].getBalance();
+            await vrfCoordinatorV2Mock.fulfillRandomWords(
+              txReceipt.events[1].args.requestId,
+              raffle.address
+            );
+          });
         });
       });
     });
